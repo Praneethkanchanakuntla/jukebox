@@ -25,6 +25,7 @@ func (c *DataBaseConnection) DSN() string {
 	mc.Addr = net.JoinHostPort(c.Host, c.Port)
 	mc.DBName = c.Database
 	mc.ParseTime = true
+	mc.ClientFoundRows = true
 	return mc.FormatDSN()
 }
 

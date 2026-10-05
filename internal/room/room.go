@@ -87,3 +87,27 @@ func (s *Store) GetAllRooms(ctx context.Context) ([]Room, error) {
 	return db_rooms, nil
 
 }
+
+type UpdateRoom struct {
+	Name   *string
+	Locked *bool
+}
+
+func (s *Store) UpdateRoom(ctx context.Context, id int64, in UpdateRoom) (int64, error) {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE room
+		 SET name   = COALESCE(?, name),
+		     locked = COALESCE(?, locked)
+		 WHERE id = ?`,
+		in.Name, in.Locked, id,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("update room %d: %w", id, err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("rows affected for room %d: %w", id, err)
+	}
+	return rows, nil
+}
