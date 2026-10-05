@@ -1,0 +1,12 @@
+-- +goose Up
+CREATE TABLE room (
+  id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name       VARCHAR(255)    NOT NULL,
+  created_by VARCHAR(64)     NOT NULL,
+  locked     BOOLEAN         NOT NULL DEFAULT FALSE,
+  passcode   VARCHAR(10)     NULL UNIQUE,
+  created_at TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- +goose Down
+DROP TABLE IF EXISTS room;
