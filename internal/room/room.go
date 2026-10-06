@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -24,6 +25,7 @@ type CreateRoom struct {
 }
 
 var ErrNotFound = errors.New("room not found")
+var ErrPasscodeRequired = errors.New("locked room requires a nonempty passcode")
 
 type Store struct {
 	db *sql.DB
@@ -53,6 +55,9 @@ func (s *Store) GetByID(ctx context.Context, id int64) (*Room, error) {
 }
 
 func (s *Store) CreateRoom(ctx context.Context, room CreateRoom) (int64, error) {
+	if room.Locked && strings.TrimSpace(room.Passcode) == "" {
+		return 0, ErrPasscodeRequired
+	}
 	result, err := s.db.ExecContext(ctx, "INSERT INTO room (name,created_by,locked,passcode) values(?,?,?,?)", room.Name, "sample", room.Locked, room.Passcode)
 	if err != nil {
 		return 0, fmt.Errorf("create room %q: %w", room.Name, err)
@@ -94,6 +99,18 @@ type UpdateRoom struct {
 }
 
 func (s *Store) UpdateRoom(ctx context.Context, id int64, in UpdateRoom) (int64, error) {
+	if in.Locked != nil && *in.Locked {
+		existing, err := s.GetByID(ctx, id)
+		if errors.Is(err, ErrNotFound) {
+			return 0, nil
+		}
+		if err != nil {
+			return 0, err
+		}
+		if strings.TrimSpace(existing.Passcode) == "" {
+			return 0, ErrPasscodeRequired
+		}
+	}
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE room
 		 SET name   = COALESCE(?, name),

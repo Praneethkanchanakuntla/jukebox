@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -53,8 +54,8 @@ func CreateRooms(ctx *gin.Context, store *room.Store) {
 func GetRooms(ctx *gin.Context, store *room.Store) {
 	rooms, err := store.GetAllRooms(ctx.Request.Context())
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		log.Fatal("error while getting rooms", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get rooms"})
+		return
 	}
 	ctx.JSON(http.StatusOK, rooms)
 }
@@ -90,6 +91,10 @@ func editRoom(c *gin.Context, store *room.Store) {
 		Name:   req.Name,
 		Locked: req.Locked,
 	})
+	if errors.Is(err, room.ErrPasscodeRequired) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if err != nil {
 		log.Printf("failed to update room %d: %v", id, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update room"})
@@ -104,15 +109,19 @@ func editRoom(c *gin.Context, store *room.Store) {
 }
 func OpenRoom(ctx *gin.Context, store *room.Store) *room.Room {
 	roomParam := ctx.Param("id")
-	roomId, err := strconv.Atoi(roomParam)
-	if err != nil {
+	roomId, err := strconv.ParseInt(roomParam, 10, 64)
+	if err != nil || roomId <= 0 {
 		ctx.JSON(400, gin.H{"error": "invalid room id"})
 		return nil
 	}
 
 	passCode := ctx.Query("passCode")
 
-	dbRoom, err := store.GetByID(ctx.Request.Context(), int64(roomId))
+	dbRoom, err := store.GetByID(ctx.Request.Context(), roomId)
+	if errors.Is(err, room.ErrNotFound) {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "room not found"})
+		return nil
+	}
 	if err != nil {
 		ctx.JSON(500, gin.H{"error": err.Error()})
 		return nil
@@ -130,11 +139,19 @@ func OpenRoom(ctx *gin.Context, store *room.Store) *room.Room {
 }
 
 func DeleteRoom(ctx *gin.Context, store *room.Store) {
-	roomID := ctx.Param("id")
-	id, err := strconv.Atoi(roomID)
-	if err != nil {
-		ctx.JSON(500, gin.H{"error": err.Error()})
+	id, err := strconv.ParseInt(ctx.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid room ID"})
+		return
 	}
-	res, err := store.DeleteRoom(ctx.Request.Context(), int64(id))
-	ctx.JSON(201, res)
+	deleted, err := store.DeleteRoom(ctx.Request.Context(), id)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete room"})
+		return
+	}
+	if !deleted {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "room not found"})
+		return
+	}
+	ctx.JSON(http.StatusOK, deleted)
 }
