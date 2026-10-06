@@ -27,6 +27,9 @@ func RegisterRoomEndpoints(route *gin.Engine, db *sql.DB) {
 	roomGroup.PUT("/editRoom/:id", func(ctx *gin.Context) {
 		editRoom(ctx, store)
 	})
+	roomGroup.DELETE("/delete/:id", func(ctx *gin.Context) {
+		DeleteRoom(ctx, store)
+	})
 }
 
 func CreateRooms(ctx *gin.Context, store *room.Store) {
@@ -124,4 +127,14 @@ func OpenRoom(ctx *gin.Context, store *room.Store) *room.Room {
 
 	ctx.JSON(200, dbRoom)
 	return dbRoom
+}
+
+func DeleteRoom(ctx *gin.Context, store *room.Store) {
+	roomID := ctx.Param("id")
+	id, err := strconv.Atoi(roomID)
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": err.Error()})
+	}
+	res, err := store.DeleteRoom(ctx.Request.Context(), int64(id))
+	ctx.JSON(201, res)
 }

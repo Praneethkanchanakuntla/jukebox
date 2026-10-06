@@ -111,3 +111,15 @@ func (s *Store) UpdateRoom(ctx context.Context, id int64, in UpdateRoom) (int64,
 	}
 	return rows, nil
 }
+
+func (s *Store) DeleteRoom(ctx context.Context, id int64) (bool, error) {
+	result, err := s.db.ExecContext(ctx, "Delete from room where id=?", id)
+	if err != nil {
+		return false, fmt.Errorf("Error occurred while deleting the room %w", err)
+	}
+	res, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("Error occurred while deleting the room %w", err)
+	}
+	return res > 0, err
+}
