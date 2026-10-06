@@ -35,7 +35,7 @@ func CreateRooms(ctx *gin.Context, store *room.Store) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	roomId, err := store.CreateRoom(ctx, roomReq)
+	roomId, err := store.CreateRoom(ctx.Request.Context(), roomReq)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -48,7 +48,7 @@ func CreateRooms(ctx *gin.Context, store *room.Store) {
 }
 
 func GetRooms(ctx *gin.Context, store *room.Store) {
-	rooms, err := store.GetAllRooms(ctx)
+	rooms, err := store.GetAllRooms(ctx.Request.Context())
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		log.Fatal("error while getting rooms", err)
@@ -109,7 +109,7 @@ func OpenRoom(ctx *gin.Context, store *room.Store) *room.Room {
 
 	passCode := ctx.Query("passCode")
 
-	dbRoom, err := store.GetByID(ctx, int64(roomId))
+	dbRoom, err := store.GetByID(ctx.Request.Context(), int64(roomId))
 	if err != nil {
 		ctx.JSON(500, gin.H{"error": err.Error()})
 		return nil
