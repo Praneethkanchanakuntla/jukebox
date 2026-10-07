@@ -213,8 +213,8 @@ func ManagePeople(ctx *gin.Context, memberStore *memebership.Store) {
 		role = ""
 	}
 
-	if ctx.Request.Method == http.MethodPut && role == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "role cannot be empty"})
+	if ctx.Request.Method == http.MethodPut && role == "" && role != "admin" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "role can only be co host"})
 		return
 	}
 
