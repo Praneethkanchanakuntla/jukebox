@@ -10,14 +10,19 @@ import (
 
 	"jukebox/internal/room"
 
+	"jukebox/internal/memebership"
+
 	"github.com/gin-gonic/gin"
 )
 
 func RegisterRoomEndpoints(route *gin.Engine, db *sql.DB) {
 	store := room.NewStore(db)
+
+	memebership := memebership.NewMemebershipStore(db)
+
 	roomGroup := route.Group("/room")
 	roomGroup.GET("/openRoom/:id", func(ctx *gin.Context) {
-		OpenRoom(ctx, store)
+		OpenRoom(ctx, store, memebership)
 	})
 	roomGroup.POST("/createRoom", func(ctx *gin.Context) {
 		CreateRooms(ctx, store)
@@ -30,6 +35,15 @@ func RegisterRoomEndpoints(route *gin.Engine, db *sql.DB) {
 	})
 	roomGroup.DELETE("/delete/:id", func(ctx *gin.Context) {
 		DeleteRoom(ctx, store)
+	})
+	roomGroup.GET("/:id/members", func(ctx *gin.Context) {
+		ShowMembersInroom(ctx, memebership)
+	})
+	roomGroup.PUT("/:id/members/:userId", func(ctx *gin.Context) {
+		ManagePeople(ctx, memebership)
+	})
+	roomGroup.DELETE("/:id/members/:userId", func(ctx *gin.Context) {
+		ManagePeople(ctx, memebership)
 	})
 }
 
@@ -48,7 +62,6 @@ func CreateRooms(ctx *gin.Context, store *room.Store) {
 		"id":   roomId,
 		"name": roomReq.Name,
 	})
-	return
 }
 
 func GetRooms(ctx *gin.Context, store *room.Store) {
@@ -107,7 +120,7 @@ func editRoom(c *gin.Context, store *room.Store) {
 
 	c.JSON(http.StatusOK, gin.H{"status": "room updated"})
 }
-func OpenRoom(ctx *gin.Context, store *room.Store) *room.Room {
+func OpenRoom(ctx *gin.Context, store *room.Store, member *memebership.Store) *room.Room {
 	roomParam := ctx.Param("id")
 	roomId, err := strconv.ParseInt(roomParam, 10, 64)
 	if err != nil || roomId <= 0 {
@@ -134,6 +147,21 @@ func OpenRoom(ctx *gin.Context, store *room.Store) *room.Room {
 		}
 	}
 
+	// create memebership once we open a room
+	memberID, err := member.JoinRoom(ctx.Request.Context(), memebership.ShowMembership{
+		RoomId:          int(roomId),
+		Member_id:       1,
+		Membership_role: "listener",
+	})
+
+	if err != nil || memberID == 0 {
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create membership table reference: " + err.Error()})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create membership table reference"})
+		}
+		return nil
+	}
 	ctx.JSON(200, dbRoom)
 	return dbRoom
 }
@@ -154,4 +182,62 @@ func DeleteRoom(ctx *gin.Context, store *room.Store) {
 		return
 	}
 	ctx.JSON(http.StatusOK, deleted)
+}
+
+func ManagePeople(ctx *gin.Context, memberStore *memebership.Store) {
+	roomID, err := strconv.Atoi(ctx.Param("id"))
+	if err != nil || roomID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid room ID"})
+		return
+	}
+
+	userID, err := strconv.Atoi(ctx.Param("userId"))
+	if err != nil || userID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
+
+	var req struct {
+		Role string `json:"role"`
+	}
+
+	if ctx.Request.Method == http.MethodPut {
+		if err := ctx.ShouldBindJSON(&req); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+	}
+
+	role := strings.TrimSpace(req.Role)
+	if ctx.Request.Method == http.MethodDelete {
+		role = ""
+	}
+
+	if ctx.Request.Method == http.MethodPut && role == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "role cannot be empty"})
+		return
+	}
+
+	if err := memberStore.ManageMembers(ctx.Request.Context(), roomID, userID, role); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "membership updated"})
+}
+
+func ShowMembersInroom(ctx *gin.Context, memberStore *memebership.Store) {
+	roomID, err := strconv.Atoi(ctx.Param("id"))
+	if err != nil || roomID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid room ID"})
+		return
+	}
+
+	members, err := memberStore.ShowMembershipDetails(ctx.Request.Context(), roomID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, members)
 }
