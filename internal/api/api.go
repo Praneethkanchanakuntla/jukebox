@@ -36,6 +36,9 @@ func RegisterRoomEndpoints(route *gin.Engine, db *sql.DB) {
 	roomGroup.DELETE("/delete/:id", func(ctx *gin.Context) {
 		DeleteRoom(ctx, store)
 	})
+	roomGroup.POST("/:id/leave", func(ctx *gin.Context) {
+		LeaveRoom(ctx, memebership)
+	})
 	roomGroup.GET("/:id/members", func(ctx *gin.Context) {
 		ShowMembersInroom(ctx, memebership)
 	})
@@ -147,10 +150,16 @@ func OpenRoom(ctx *gin.Context, store *room.Store, member *memebership.Store) *r
 		}
 	}
 
-	// create memebership once we open a room
+	// Temporary identity input until verified authentication is wired in.
+	userID, err := strconv.Atoi(ctx.Query("userId"))
+	if err != nil || userID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "a positive userId is required"})
+		return nil
+	}
+	// Create or restore membership once we open a room.
 	memberID, err := member.JoinRoom(ctx.Request.Context(), memebership.ShowMembership{
 		RoomId:          int(roomId),
-		Member_id:       1,
+		Member_id:       userID,
 		Membership_role: "listener",
 	})
 
@@ -213,13 +222,13 @@ func ManagePeople(ctx *gin.Context, memberStore *memebership.Store) {
 		role = ""
 	}
 
-	if ctx.Request.Method == http.MethodPut && role == "" && role != "admin" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "role can only be co host"})
+	if ctx.Request.Method == http.MethodPut && (role != "co_host" && role != "listener") {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "role must be co_host or listener"})
 		return
 	}
 
 	if err := memberStore.ManageMembers(ctx.Request.Context(), roomID, userID, role); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		membershipError(ctx, err)
 		return
 	}
 
@@ -240,4 +249,38 @@ func ShowMembersInroom(ctx *gin.Context, memberStore *memebership.Store) {
 	}
 
 	ctx.JSON(http.StatusOK, members)
+}
+
+func membershipError(ctx *gin.Context, err error) {
+	switch {
+	case errors.Is(err, memebership.ErrNotFound):
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	case errors.Is(err, memebership.ErrInvalidRole):
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case errors.Is(err, memebership.ErrHostProtected), errors.Is(err, memebership.ErrCoHostLimit):
+		ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	default:
+		log.Printf("membership operation failed: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "membership operation failed"})
+	}
+}
+
+// LeaveRoom marks a member offline while preserving membership and role.
+// userId is temporary until identity comes from a verified session.
+func LeaveRoom(ctx *gin.Context, store *memebership.Store) {
+	roomID, err := strconv.Atoi(ctx.Param("id"))
+	if err != nil || roomID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid room ID"})
+		return
+	}
+	userID, err := strconv.Atoi(ctx.Query("userId"))
+	if err != nil || userID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "a positive userId is required"})
+		return
+	}
+	if err := store.SetOnline(ctx.Request.Context(), roomID, userID, false); err != nil {
+		membershipError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"status": "left room"})
 }
