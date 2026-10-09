@@ -10,6 +10,7 @@ import (
 )
 
 var (
+	ErrForbidden     = errors.New("room permission denied")
 	ErrNotFound      = errors.New("room or membership not found")
 	ErrInvalidRole   = errors.New("role must be co_host or listener")
 	ErrHostProtected = errors.New("the host cannot be removed or demoted")
@@ -18,7 +19,8 @@ var (
 
 type ShowMembership struct {
 	RoomId          int
-	Member_id       int
+	Member_id       string `json:"member_id"`
+	Username        string `json:"username"`
 	Membership_role string
 	JoinedAt        time.Time
 	IsOnline        bool `json:"is_online"`
@@ -28,19 +30,15 @@ type Store struct{ sql *sql.DB }
 
 func NewMemebershipStore(db *sql.DB) *Store { return &Store{sql: db} }
 
-func (store *Store) JoinRoom(ctx context.Context, m ShowMembership) (int, error) {
-	// Returning members retain their role and join time.
-	result, err := store.sql.ExecContext(ctx, `INSERT INTO membership
+func (store *Store) JoinRoom(ctx context.Context, roomID int, userID string) error {
+	// Rejoining only changes presence; the existing role and join time remain.
+	_, err := store.sql.ExecContext(ctx, `INSERT INTO membership
  (room_id, user_id, membership_role, is_online) VALUES (?, ?, 'listener', TRUE)
- ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), is_online = TRUE`, m.RoomId, m.Member_id)
+ ON DUPLICATE KEY UPDATE is_online = TRUE`, roomID, userID)
 	if err != nil {
-		return 0, fmt.Errorf("join room: %w", err)
+		return fmt.Errorf("join room: %w", err)
 	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("get membership id: %w", err)
-	}
-	return int(id), nil
+	return nil
 }
 
 func (store *Store) ShowMembershipDetails(ctx context.Context, roomID int) ([]ShowMembership, error) {
@@ -64,17 +62,7 @@ func (store *Store) ShowMembershipDetails(ctx context.Context, roomID int) ([]Sh
 	return memberships, nil
 }
 
-// lockRoom serializes membership changes even when a room has no members yet.
-func lockRoom(ctx context.Context, tx *sql.Tx, roomID int) error {
-	var id int
-	err := tx.QueryRowContext(ctx, "SELECT id FROM room WHERE id = ? FOR UPDATE", roomID).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
-	return err
-}
-
-func (store *Store) ManageMembers(ctx context.Context, roomID, userID int, role string) error {
+func (store *Store) ManageMembers(ctx context.Context, roomID int, targetUserID, role, actorUserID string) error {
 	role = strings.TrimSpace(role)
 	if role != "" && role != "co_host" && role != "listener" {
 		return ErrInvalidRole
@@ -84,11 +72,23 @@ func (store *Store) ManageMembers(ctx context.Context, roomID, userID int, role 
 		return err
 	}
 	defer tx.Rollback()
-	if err := lockRoom(ctx, tx, roomID); err != nil {
+	// Locking the room serializes concurrent promotions and reads its owner once.
+	var owner string
+	err = tx.QueryRowContext(ctx, "SELECT created_by FROM room WHERE id = ? FOR UPDATE", roomID).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
 		return err
 	}
+	if actorUserID == "" || owner != actorUserID {
+		return ErrForbidden
+	}
+	if targetUserID == owner {
+		return ErrHostProtected
+	}
 	var current string
-	err = tx.QueryRowContext(ctx, "SELECT membership_role FROM membership WHERE room_id = ? AND user_id = ? FOR UPDATE", roomID, userID).Scan(&current)
+	err = tx.QueryRowContext(ctx, "SELECT membership_role FROM membership WHERE room_id = ? AND user_id = ? FOR UPDATE", roomID, targetUserID).Scan(&current)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -118,9 +118,9 @@ func (store *Store) ManageMembers(ctx context.Context, roomID, userID int, role 
 		}
 	}
 	if role == "" {
-		_, err = tx.ExecContext(ctx, "DELETE FROM membership WHERE room_id = ? AND user_id = ?", roomID, userID)
+		_, err = tx.ExecContext(ctx, "DELETE FROM membership WHERE room_id = ? AND user_id = ?", roomID, targetUserID)
 	} else {
-		_, err = tx.ExecContext(ctx, "UPDATE membership SET membership_role = ? WHERE room_id = ? AND user_id = ?", role, roomID, userID)
+		_, err = tx.ExecContext(ctx, "UPDATE membership SET membership_role = ? WHERE room_id = ? AND user_id = ?", role, roomID, targetUserID)
 	}
 	if err != nil {
 		return err
@@ -129,22 +129,34 @@ func (store *Store) ManageMembers(ctx context.Context, roomID, userID int, role 
 }
 
 // SetOnline changes presence without deleting membership or losing its role.
-func (store *Store) SetOnline(ctx context.Context, roomID, userID int, online bool) error {
-	tx, err := store.sql.BeginTx(ctx, nil)
+func (store *Store) SetOnline(ctx context.Context, roomID int, userID string, online bool) error {
+	result, err := store.sql.ExecContext(ctx, "UPDATE membership SET is_online = ? WHERE room_id = ? AND user_id = ?", online, roomID, userID)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	// The shared MySQL pool uses ClientFoundRows, so repeated leaves still match.
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (store *Store) RequireMember(ctx context.Context, roomID int, userID string) error {
 	var id int
-	err = tx.QueryRowContext(ctx, "SELECT id FROM membership WHERE room_id = ? AND user_id = ? FOR UPDATE", roomID, userID).Scan(&id)
+	err := store.sql.QueryRowContext(ctx, "SELECT id FROM room WHERE id = ?", roomID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, "UPDATE membership SET is_online = ? WHERE id = ?", online, id); err != nil {
-		return err
+	err = store.sql.QueryRowContext(ctx, "SELECT id FROM membership WHERE room_id = ? AND user_id = ?", roomID, userID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrForbidden
 	}
-	return tx.Commit()
+	return err
 }

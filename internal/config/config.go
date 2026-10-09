@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/clerk/clerk-sdk-go/v2"
 	"github.com/joho/godotenv"
 )
 
@@ -40,4 +41,11 @@ func LoadDatabase() (*DataBaseConnection, error) {
 		return nil, fmt.Errorf("missing env vars: %s", strings.Join(missing, ", "))
 	}
 	return cfg, nil
+}
+
+func LoadClerkCereds() {
+	_ = godotenv.Load()
+
+	clerk_key := os.Getenv("CLERK_SECRET_KEY")
+	clerk.SetKey(clerk_key)
 }
