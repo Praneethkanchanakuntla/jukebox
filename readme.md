@@ -1,0 +1,1 @@
+Users can host their friends by creating rooms. Users can view a list of available rooms and join one. There are two room types: public and private. Private rooms require a passcode to enter.
