@@ -20,6 +20,7 @@ import (
 	"github.com/clerk/clerk-sdk-go/v2"
 	"github.com/clerk/clerk-sdk-go/v2/user"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func RegisterRoomEndpoints(route *gin.Engine, db *sql.DB) {
@@ -67,6 +68,8 @@ func CreateRooms(ctx *gin.Context, store *room.Store) {
 		return
 	}
 	clerkId := ctx.GetString("clerk_user_id")
+	hash_password, err := bcrypt.GenerateFromPassword([]byte(roomReq.Passcode), bcrypt.DefaultCost)
+	roomReq.Passcode = string(hash_password)
 	roomReq.CreatedBy = clerkId
 	roomId, err := store.CreateRoom(ctx.Request.Context(), roomReq)
 	if err != nil {
