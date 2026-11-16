@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -33,7 +34,7 @@ func RegisterRoomEndpoints(route *gin.Engine, db *sql.DB) {
 
 	roomGroup := route.Group("/room")
 	roomGroup.Use(middleware.ClerkAuthMiddleware())
-	roomGroup.GET("/openRoom/:id", func(ctx *gin.Context) {
+	roomGroup.POST("/openRoom/:id", func(ctx *gin.Context) {
 		OpenRoom(ctx, store, memebership)
 	})
 	roomGroup.POST("/createRoom", func(ctx *gin.Context) {
@@ -184,16 +185,21 @@ func editRoom(c *gin.Context, store *room.Store) {
 	c.JSON(http.StatusOK, gin.H{"status": "room updated"})
 }
 func OpenRoom(ctx *gin.Context, store *room.Store, member *memebership.Store) *room.Room {
-	roomParam := ctx.Param("id")
-	roomId, err := strconv.ParseInt(roomParam, 10, 64)
-	if err != nil || roomId <= 0 {
-		ctx.JSON(400, gin.H{"error": "invalid room id"})
+	roomID, err := strconv.ParseInt(ctx.Param("id"), 10, 64)
+	if err != nil || roomID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid room id"})
 		return nil
 	}
 
-	passCode := ctx.Query("passCode")
+	var request struct {
+		Passcode string `json:"passcode"`
+	}
+	if err := ctx.ShouldBindJSON(&request); err != nil && !errors.Is(err, io.EOF) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return nil
+	}
 
-	dbRoom, err := store.GetByID(ctx.Request.Context(), roomId)
+	dbRoom, err := store.GetByID(ctx.Request.Context(), roomID)
 	if errors.Is(err, room.ErrNotFound) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "room not found"})
 		return nil
@@ -204,15 +210,15 @@ func OpenRoom(ctx *gin.Context, store *room.Store, member *memebership.Store) *r
 	}
 
 	if dbRoom.Locked {
-		if !matchesRoomPasscode(dbRoom.Passcode, passCode) {
+		if !matchesRoomPasscode(dbRoom.Passcode, request.Passcode) {
 			ctx.JSON(401, gin.H{"error": "wrong passcode"})
 			return nil
 		}
 	}
 
 	userID := ctx.GetString("clerk_user_id")
-	if err := member.JoinRoom(ctx.Request.Context(), int(roomId), userID); err != nil {
-		log.Printf("join room %d: %v", roomId, err)
+	if err := member.JoinRoom(ctx.Request.Context(), int(roomID), userID); err != nil {
+		log.Printf("join room %d: %v", roomID, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to join room"})
 		return nil
 	}
