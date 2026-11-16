@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"jukebox/internal/room"
 
@@ -68,8 +69,20 @@ func CreateRooms(ctx *gin.Context, store *room.Store) {
 		return
 	}
 	clerkId := ctx.GetString("clerk_user_id")
-	hash_password, err := bcrypt.GenerateFromPassword([]byte(roomReq.Passcode), bcrypt.DefaultCost)
-	roomReq.Passcode = string(hash_password)
+	if strings.TrimSpace(roomReq.Passcode) == "" {
+		if roomReq.Locked {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": room.ErrPasscodeRequired.Error()})
+			return
+		}
+		roomReq.Passcode = ""
+	} else {
+		hash, err := bcrypt.GenerateFromPassword([]byte(roomReq.Passcode), bcrypt.DefaultCost)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		roomReq.Passcode = string(hash)
+	}
 	roomReq.CreatedBy = clerkId
 	roomId, err := store.CreateRoom(ctx.Request.Context(), roomReq)
 	if err != nil {
@@ -191,7 +204,7 @@ func OpenRoom(ctx *gin.Context, store *room.Store, member *memebership.Store) *r
 	}
 
 	if dbRoom.Locked {
-		if dbRoom.Passcode != passCode {
+		if !matchesRoomPasscode(dbRoom.Passcode, passCode) {
 			ctx.JSON(401, gin.H{"error": "wrong passcode"})
 			return nil
 		}
@@ -205,6 +218,14 @@ func OpenRoom(ctx *gin.Context, store *room.Store, member *memebership.Store) *r
 	}
 	ctx.JSON(200, dbRoom)
 	return dbRoom
+}
+
+func matchesRoomPasscode(stored, submitted string) bool {
+	// Before bcrypt, the database limited plaintext passcodes to 10 characters.
+	if utf8.RuneCountInString(stored) <= 10 {
+		return stored == submitted
+	}
+	return bcrypt.CompareHashAndPassword([]byte(stored), []byte(submitted)) == nil
 }
 
 func DeleteRoom(ctx *gin.Context, store *room.Store) {
