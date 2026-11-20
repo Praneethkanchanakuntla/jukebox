@@ -34,7 +34,7 @@ func (store *Store) JoinRoom(ctx context.Context, roomID int, userID string) err
 	// Rejoining only changes presence; the existing role and join time remain.
 	_, err := store.sql.ExecContext(ctx, `INSERT INTO membership
  (room_id, user_id, membership_role, is_online) VALUES (?, ?, 'listener', TRUE)
- ON DUPLICATE KEY UPDATE is_online = TRUE`, roomID, userID)
+ ON DUPLICATE KEY UPDATE is_online = TRUE, last_updated_at = CURRENT_TIMESTAMP`, roomID, userID)
 	if err != nil {
 		return fmt.Errorf("join room: %w", err)
 	}
@@ -42,7 +42,8 @@ func (store *Store) JoinRoom(ctx context.Context, roomID int, userID string) err
 }
 
 func (store *Store) ShowMembershipDetails(ctx context.Context, roomID int) ([]ShowMembership, error) {
-	rows, err := store.sql.QueryContext(ctx, `SELECT room_id, user_id, membership_role, joined_at, is_online
+	rows, err := store.sql.QueryContext(ctx, `SELECT room_id, user_id, membership_role, joined_at,
+ (is_online = TRUE AND last_updated_at > CURRENT_TIMESTAMP - INTERVAL 90 SECOND) AS is_online
  FROM membership WHERE room_id = ? ORDER BY joined_at ASC`, roomID)
 	if err != nil {
 		return nil, fmt.Errorf("query memberships: %w", err)

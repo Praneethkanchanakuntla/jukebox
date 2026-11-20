@@ -61,8 +61,8 @@ func RegisterRoomEndpoints(route *gin.Engine, db *sql.DB) {
 	roomGroup.DELETE("/:id/members/:userId", func(ctx *gin.Context) {
 		ManagePeople(ctx, memebership)
 	})
-	roomGroup.PUT("/heartbeat/",func(ctx *gin.Context) {
-		CheckPersonOnline(ctx,memebership)
+	roomGroup.PUT("/heartbeat/", func(ctx *gin.Context) {
+		CheckPersonOnline(ctx, memebership)
 	})
 }
 
@@ -433,7 +433,8 @@ func CheckPersonOnline(ctx *gin.Context, store *memebership.Store) {
 		return
 	}
 
-	request.UserID = strings.TrimSpace(request.UserID)
+	//get userId from cookie session
+	request.UserID = ctx.GetString("clerk_user_id")
 	if request.RoomID <= 0 {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid room ID"})
 		return
