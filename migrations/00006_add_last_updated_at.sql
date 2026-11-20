@@ -1,0 +1,9 @@
+-- +goose Up
+ALTER TABLE membership
+ADD COLUMN last_updated_at TIMESTAMP NOT NULL
+DEFAULT CURRENT_TIMESTAMP
+ON UPDATE CURRENT_TIMESTAMP;
+
+-- +goose Down
+ALTER TABLE membership
+DROP COLUMN last_updated_at;

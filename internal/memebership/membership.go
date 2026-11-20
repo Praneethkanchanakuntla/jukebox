@@ -160,3 +160,22 @@ func (store *Store) RequireMember(ctx context.Context, roomID int, userID string
 	}
 	return err
 }
+
+// CheckPersonOnline records a heartbeat for an existing room member.
+func (store *Store) CheckPersonOnline(ctx context.Context, roomID int, userID string) error {
+	result, err := store.sql.ExecContext(ctx, `
+		UPDATE membership SET last_updated_at = CURRENT_TIMESTAMP
+		WHERE room_id = ? AND user_id = ?`, roomID, userID)
+	if err != nil {
+		return fmt.Errorf("record membership heartbeat: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read membership heartbeat result: %w", err)
+	}
+	if count == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}

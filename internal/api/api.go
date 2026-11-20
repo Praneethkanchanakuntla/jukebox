@@ -61,6 +61,9 @@ func RegisterRoomEndpoints(route *gin.Engine, db *sql.DB) {
 	roomGroup.DELETE("/:id/members/:userId", func(ctx *gin.Context) {
 		ManagePeople(ctx, memebership)
 	})
+	roomGroup.PUT("/heartbeat/",func(ctx *gin.Context) {
+		CheckPersonOnline(ctx,memebership)
+	})
 }
 
 func CreateRooms(ctx *gin.Context, store *room.Store) {
@@ -418,4 +421,32 @@ func clerkDisplayNames(ctx context.Context, ids []string) map[string]string {
 		}
 	}
 	return names
+}
+
+func CheckPersonOnline(ctx *gin.Context, store *memebership.Store) {
+	var request struct {
+		RoomID int    `json:"roomId"`
+		UserID string `json:"userId"`
+	}
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	request.UserID = strings.TrimSpace(request.UserID)
+	if request.RoomID <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid room ID"})
+		return
+	}
+	if request.UserID == "" || len(request.UserID) > 64 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
+
+	err := store.CheckPersonOnline(ctx.Request.Context(), request.RoomID, request.UserID)
+	if err != nil {
+		membershipError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"status": "heart beat passed"})
 }

@@ -2,7 +2,7 @@
 export
 
 DB_STRING = $(DB_USER):$(DB_PASSWORD)@tcp($(DB_HOST):$(DB_PORT))/$(DB_NAME)?parseTime=true
-GOOSE     = goose -dir migrations mysql "$(DB_STRING)"
+GOOSE     = GOOSE_DRIVER=mysql GOOSE_DBSTRING="$$DB_STRING" goose -dir migrations
 
 .PHONY: run migrate-create migrate-up migrate-down migrate-redo migrate-status
 
@@ -13,13 +13,13 @@ migrate-create:
 	goose -dir migrations -s create $(name) sql
 
 migrate-up:
-	$(GOOSE) up
+	@$(GOOSE) up
 
 migrate-down:
-	$(GOOSE) down
+	@$(GOOSE) down
 
 migrate-redo:
-	$(GOOSE) redo
+	@$(GOOSE) redo
 
 migrate-status:
-	$(GOOSE) status
+	@$(GOOSE) status

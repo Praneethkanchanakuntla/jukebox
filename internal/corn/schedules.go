@@ -25,7 +25,9 @@ func (s *Store) DeleteStaleRooms(ctx context.Context) (int64, error) {
 		DELETE FROM room
 		WHERE NOT EXISTS (
 			SELECT 1 FROM membership m
-			WHERE m.room_id = room.id AND m.is_online = 1
+			WHERE m.room_id = room.id
+			  AND m.is_online = TRUE
+			  AND m.last_updated_at > CURRENT_TIMESTAMP - INTERVAL 90 SECOND
 		)`)
 	if err != nil {
 		return 0, fmt.Errorf("delete stale rooms: %w", err)
