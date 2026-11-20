@@ -26,6 +26,7 @@ func (s *Store) DeleteStaleRooms(ctx context.Context) (int64, error) {
 		WHERE NOT EXISTS (
 			SELECT 1 FROM membership m
 			WHERE m.room_id = room.id
+			  AND m.user_id = room.created_by
 			  AND m.is_online = TRUE
 			  AND m.last_updated_at > CURRENT_TIMESTAMP - INTERVAL 90 SECOND
 		)`)
